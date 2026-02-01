@@ -1,0 +1,146 @@
+# =============================================================================
+# Project Management Agent - Docker Compose (Development)
+# =============================================================================
+# This file defines the local development stack with hot-reloading and Postgres.
+#
+# Usage:
+#   docker compose up          # Start all services
+#   docker compose up -d       # Start in background
+#   docker compose down        # Stop all services
+#   docker compose down -v     # Stop and delete volumes (reset DB)
+#   docker compose logs -f api # Follow API logs
+#
+# === PHP Comparison ===
+# Like Laravel Sail, but simpler and more explicit.
+#
+# === Go Comparison ===
+# Similar to using `docker-compose` with Air for hot-reload.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # FastAPI Service (The Brain)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder # Use builder stage for dev (has more tools)
+    container_name: atlat-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for hot-reloading
+      # Changes to Python files trigger automatic restart
+      - .:/app
+      # Exclude virtual environment (use container's packages)
+      - /app/.venv
+    environment:
+      # Database connection for PostgresSaver
+      - DATABASE_URL=postgresql+asyncpg://atlat:atlat_secret@db:5432/atlat_db
+      # Use Postgres checkpointer in Docker environment
+      - CHECKPOINTER_DRIVER=postgres
+      # Development mode
+      - APP_ENV=development
+      - DEBUG=true
+      # Python settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      db:
+        condition: service_healthy
+    # Override CMD for development (with hot-reload)
+    # NOTE: pip --user installs to /root/.local/bin, so we need to set PATH
+    command: >
+      sh -c "export PATH=/root/.local/bin:$PATH &&
+             pip install --user -r requirements.txt &&
+             uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload"
+    networks:
+      - atlat-network
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  # Used by PostgresSaver for persistent agent state
+  db:
+    image: postgres:16-alpine
+    container_name: atlat-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: atlat
+      POSTGRES_PASSWORD: atlat_secret
+      POSTGRES_DB: atlat_db
+    volumes:
+      # Persist database data between container restarts
+      - postgres_data:/var/lib/postgresql/data
+      # Optional: Initialize database with custom SQL
+      # - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - atlat-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U atlat -d atlat_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  # ---------------------------------------------------------------------------
+  # Chainlit UI (Chat Interface)
+  # ---------------------------------------------------------------------------
+  # TEMPORARILY DISABLED: chainlit has a dependency conflict with mcp
+  # - mcp requires starlette>=0.39  
+  # - chainlit requires fastapi<0.113 (starlette<0.33)
+  # Will be re-enabled in Phase 4 once we find a compatible version or alternative.
+  #
+  # ui:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.chainlit
+  #   container_name: atlat-ui
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     - API_URL=http://api:8000
+  #     - CHAINLIT_AUTH_SECRET=dev-secret-change-in-production
+  #   depends_on:
+  #     - api
+  #   networks:
+  #     - atlat-network
+  # ---------------------------------------------------------------------------
+  # PgAdmin (Optional - Database Management UI)
+  # ---------------------------------------------------------------------------
+  # Uncomment to enable a web UI for database management
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: atlat-pgadmin
+  #   ports:
+  #     - "5050:80"
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@atlat.local
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   depends_on:
+  #     - db
+  #   networks:
+  #     - atlat-network
+
+  # =============================================================================
+  # Networks
+  # =============================================================================
+  # All services share this network for inter-container communication
+networks:
+  atlat-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+# Named volume for PostgreSQL data persistence
+volumes:
+  postgres_data:
+    driver: local
