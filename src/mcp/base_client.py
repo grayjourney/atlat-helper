@@ -102,28 +102,15 @@ class BaseMCPClient(ABC):
                 return await self._get(f"/issue/{ticket_id}")
     """
     
-    def __init__(self, base_url: str, api_token: str | None = None):
-
+    def __init__(self, base_url: str, auth_headers: dict[str, str] | None = None):
         self.base_url = base_url
-        self.api_token = api_token
+        self._auth_headers = auth_headers or {}
         self._client: httpx.AsyncClient | None = None
-        pass
     
     async def __aenter__(self) -> "BaseMCPClient":
-        """
-        Async context manager entry - initialize the HTTP client.
-        
-        Usage:
-            async with JiraMCPClient(url, token) as client:
-                ticket = await client.get_ticket("PROJ-123")
-        """
-        headers = {}
-        if self.api_token:
-            headers["Authorization"] = f"Bearer {self.api_token}"
-
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
-            headers=headers,
+            headers=self._auth_headers,
             timeout=httpx.Timeout(30.0),
         )
         return self

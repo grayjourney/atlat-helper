@@ -1,101 +1,10 @@
-# =============================================================================
-# FastAPI Server - The Brain (Enhanced with Lifespan Events)
-# =============================================================================
-"""
-This is the central API server for the Atlassian Helper Agent.
-All agent orchestration flows through this server.
-
-Run with:
-    uvicorn src.api.server:app --reload
-
-Or via Docker:
-    docker compose up
-
-=== MENTOR NOTE: App Factory Pattern ===
-
-WHY NOT JUST `app = FastAPI()` globally?
-
-    # BAD - Global app with no control:
-    app = FastAPI()
-    
-    @app.get("/")
-    def root():
-        return {"message": "Hello"}
-        
-    # PROBLEM: You can't configure different settings for test vs prod.
-    # PROBLEM: Every import of this module triggers app creation.
-    # PROBLEM: Can't run setup logic before routes are registered.
-
-BETTER - Factory function creates app when YOU decide:
-
-    def create_app(config: Settings) -> FastAPI:
-        app = FastAPI(title=config.app_name)
-        # ... configure app based on settings ...
-        return app
-    
-    # In test: create_app(TestSettings())
-    # In prod: create_app(ProdSettings())
-
-=== PHP Comparison ===
-Like Laravel's bootstrap/app.php creating the Application container,
-or Symfony's Kernel::boot() method that initializes the framework.
-
-=== Go Comparison ===
-Like `func NewServer(cfg *Config) *chi.Mux` pattern where you inject
-config into a constructor function that returns the configured router.
-
-Author: Gray
-License: MIT
-"""
-
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import routes from separate module (separation of concerns)
 from src.api.routes import register_routes
-
-
-# =============================================================================
-# LIFESPAN EVENTS (Startup & Shutdown)
-# =============================================================================
-"""
-=== MENTOR NOTE: @asynccontextmanager ===
-
-What is `@asynccontextmanager`?
-
-    It's a decorator that turns an async generator function into a 
-    context manager. The code BEFORE `yield` runs on startup,
-    and the code AFTER `yield` runs on shutdown.
-
-=== Go Comparison ===
-In Go, you'd use `defer` for cleanup:
-
-    func main() {
-        db := connectDB()
-        defer db.Close()  // Runs when main() exits
-        
-        server.Run()
-    }
-
-Python's asynccontextmanager is similar but MORE POWERFUL:
-- Works with async/await
-- Can wrap around the entire app lifecycle
-- try/finally pattern handles errors gracefully
-
-=== PHP Comparison ===
-Like Laravel's AppServiceProvider::boot() for startup
-and terminate() middleware for shutdown.
-
-WHY USE THIS?
-
-1. Database connections: Open on startup, close on shutdown
-2. LLM clients: Initialize expensive objects once, reuse
-3. Background tasks: Start workers, cancel on shutdown
-4. Cleanup: Flush logs, close file handles gracefully
-"""
 
 
 @asynccontextmanager
@@ -180,7 +89,7 @@ def create_app() -> FastAPI:
     # -----------------------------------------
     app = FastAPI(
         title="Atlassian Helper Agent",
-        description="A Cursor-like AI agent for Jira/Trello/Confluence",
+        description="An Endpoint of AI agent for Jira/Trello/Confluence",
         version="0.1.0",
         docs_url="/docs",           # Swagger UI  (localhost:8000/docs)
         redoc_url="/redoc",         # ReDoc       (localhost:8000/redoc)

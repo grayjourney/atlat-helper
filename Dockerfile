@@ -1,20 +1,3 @@
-# =============================================================================
-# Project Management Agent - Multi-Stage Dockerfile
-# =============================================================================
-# This Dockerfile uses multi-stage builds to create a minimal production image.
-#
-# === PHP Comparison ===
-# Like optimizing a Laravel app with opcache and removing dev dependencies:
-#   composer install --no-dev --optimize-autoloader
-#
-# === Go Comparison ===
-# Go compiles to a single binary, but Python needs the interpreter.
-# Multi-stage helps us exclude build tools from the final image.
-#
-# Build:  docker build -t atlat-helper .
-# Run:    docker run -p 8000:8000 atlat-helper
-# =============================================================================
-
 # -----------------------------------------------------------------------------
 # Stage 1: Builder
 # -----------------------------------------------------------------------------
