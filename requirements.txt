@@ -18,6 +18,11 @@ uvicorn[standard]>=0.27.0,<0.32.0
 langgraph>=0.2.0,<0.4.0
 langchain-core>=0.3.0,<0.4.0
 
+# LLM Providers
+langchain-google-genai>=2.0.0,<3.0.0
+langchain-anthropic>=0.3.0,<0.4.0
+langchain-ollama>=0.2.0,<0.3.0
+
 # LangGraph Postgres Checkpointer (for production persistence)
 langgraph-checkpoint-postgres>=2.0.0,<3.0.0
 
@@ -29,12 +34,8 @@ mcp>=1.0.0,<2.0.0
 # =============================================================================
 # Chat UI Framework
 # =============================================================================
-# IMPORTANT: Chainlit is in a SEPARATE container (Dockerfile.chainlit)
-# because it has a dependency conflict with mcp:
-#   - mcp requires starlette>=0.39
-#   - chainlit requires fastapi<0.113 (starlette<0.33)
-# See: docker-compose.yml -> ui service
-# chainlit>=1.0.0,<2.0.0  # DO NOT UNCOMMENT - use separate container
+# Chainlit 2.6.3+ is compatible with FastAPI 0.115.x and starlette 0.40+
+chainlit>=2.6.0,<3.0.0
 
 # =============================================================================
 # Data Validation & Configuration

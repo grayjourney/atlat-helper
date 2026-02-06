@@ -1,0 +1,6 @@
+[project]
+name = "atlat-ui"
+version = "0.1.0"
+
+[features.unsafe_allow_match_all]
+enabled = true
