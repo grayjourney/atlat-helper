@@ -13,6 +13,11 @@ class IntentClassification(BaseModel):
 
 async def classify_intent(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     """Classify user intent from the latest message."""
+    # check for awaiting input
+    if state.get("awaiting_input"):
+        if state["awaiting_input"] == "cloud_id_selection":
+            return {"intent": "ticket"}
+
     last_message = state["messages"][-1].content
     
     configurable = config.get("configurable", {})

@@ -4,13 +4,16 @@ An AI-powered agent for Jira, Trello, and Confluence management.
 
 ## Quick Start
 
-```bash
-# Start the development stack
-make dev
+[User Manual](USER_MANUAL.md) | [Architecture](technical-details.md) | [Changelog](.gemini/antigravity/brain/bde097b5-98fd-4818-9228-6b3a9be0f302/changelog.md)
 
-# Or manually
-docker compose up --build
-```
+## Quick Start
+
+1.  **Start the app**:
+    ```bash
+    make dev
+    ```
+2.  **Open UI**: [http://localhost:8081](http://localhost:8081)
+3.  **Connect**: Click "Connect to Atlassian" in the chat.
 
 ## API Endpoints
 

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import register_routes
+from src.api.oauth_routes import router as oauth_router
 
 
 @asynccontextmanager
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
+    app.include_router(oauth_router)
     register_routes(app)
     
     return app

@@ -20,6 +20,10 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
+      - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
+      - AUTH_PROXY_URL=${AUTH_PROXY_URL:-http://localhost:8001}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       db:
         condition: service_healthy
@@ -37,28 +41,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  mock-jira:
-    build:
-      context: .
-      target: builder
-    container_name: atlat-mock-jira
-    ports:
-      - "8001:8001"
-    volumes:
-      - .:/app
-    command: >
-      sh -c "export PATH=/root/.local/bin:$$PATH &&
-             pip install --user -r requirements.txt &&
-             uvicorn src.mcp.mock_server:app --host 0.0.0.0 --port 8001 --reload"
-    networks:
-      - atlat-network
-    healthcheck:
-      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health')" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
   db:
     image: postgres:16-alpine
@@ -91,6 +73,8 @@ services:
       - "8081:8080"
     environment:
       - API_URL=http://api:8000
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8000}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - CHAINLIT_AUTH_SECRET=dev-secret-change-in-production
     depends_on:
       - api

@@ -6,14 +6,10 @@ from langgraph.graph import MessagesState
 class AgentState(MessagesState):
     """
     Shared state passed between all nodes in the graph.
-    
-    Extends MessagesState (which provides 'messages' list).
-    
-    Hints:
-        # intent: Classified by router, used by supervisor for routing
-        # current_agent: Tracks which subgraph is active (for debugging)
-        # context: Shared data between nodes (e.g., fetched ticket data)
     """
     intent: Literal["ticket", "confluence", "board", "general_chat"] | None
     current_agent: str | None
     context: dict
+    # Persistence for multi-turn flows (e.g., site selection)
+    awaiting_input: str | None  # e.g., "cloud_id_selection"
+    available_sites: list[dict] | None  # Cache sites during selection

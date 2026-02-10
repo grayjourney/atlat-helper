@@ -6,6 +6,9 @@ from chainlit.input_widget import Select, TextInput
 
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
+PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+
+JIRA_TOKEN_URL = "https://id.atlassian.com/manage-profile/security/api-tokens"
 
 
 @cl.on_chat_start
@@ -26,39 +29,65 @@ async def on_chat_start():
             ),
             TextInput(
                 id="api_key",
-                label="🔑 API Key",
+                label="🔑 AI API Key",
                 description="Enter your API key (Gemini or Anthropic)",
                 placeholder="Enter your API key here...",
-                initial="",
+                initial=os.getenv("GEMINI_API_KEY", ""),
             ),
         ]
     ).send()
     
+    # Check Atlassian Auth Status
+    auth_status = "❌ Not Connected"
+    is_authenticated = False
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_URL}/auth/atlassian/status")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("authenticated"):
+                    auth_status = "✅ Connected"
+                    is_authenticated = True
+    except Exception:
+        pass
+    
+    actions = []
+    if not is_authenticated:
+        actions.append(
+            cl.Action(
+                name="connect_atlassian",
+                value="connect",
+                label="Connect to Atlassian",
+                description="Login via OAuth",
+                payload={"value": "connect"}
+            )
+        )
+    
     await cl.Message(
-        content="""# 👋 Welcome to Atlassian Helper!
+        content=f"""# 👋 Welcome to Atlassian Helper!
 
-Before we start, please configure your AI settings:
-
-1. **Select your AI model** (Gemini or Claude)
-2. **Enter your API key** in the settings panel above ⬆️
-3. Click the **⚙️ Settings** button to update
+Please configure your **AI API Key** in settings.
 
 ---
 
-### 🔑 Get Your API Key
+## 🏛️ Atlassian Connection
+Status: **{auth_status}**
 
-| Provider | Get Key |
-|----------|---------|
-| **Gemini** | [Google AI Studio](https://aistudio.google.com/apikey) |
-| **Claude** | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+{ "Click the button below to connect:" if not is_authenticated else "You are connected and ready to go!" }
+""",
+        actions=actions
+    ).send()
 
----
 
-Once configured, ask me about:
-- 📋 **Jira tickets**: "What's the status of PROJ-123?"
-- 📝 **Confluence**: "Find docs about authentication"
-- 📊 **Sprint boards**: "Show me the current sprint"
-"""
+@cl.action_callback("connect_atlassian")
+async def on_connect_atlassian(action: cl.Action):
+    """Handle connection action."""
+    login_url = f"{PUBLIC_API_URL}/auth/atlassian/login"
+    
+    await cl.Message(
+        content=f"🔗 **[Click here to Login to Atlassian]({login_url})**\n\nAfter logging in, please restart the chat or type 'check status'.",
+        author="system"
     ).send()
 
 
@@ -70,7 +99,7 @@ async def on_settings_update(settings: dict):
     
     if not api_key:
         await cl.Message(
-            content="⚠️ **API Key Required**\n\nPlease enter your API key in the settings panel above.",
+            content="⚠️ **AI API Key Required**\n\nPlease enter your AI API key in the settings panel.",
             author="system",
         ).send()
         return
@@ -78,7 +107,9 @@ async def on_settings_update(settings: dict):
     config = {
         "model_provider": model_provider,
         "api_key": api_key,
+        "jira": {"auth_type": "oauth"} # Marker for backend
     }
+    
     cl.user_session.set("config", config)
     cl.user_session.set("configured", True)
     
@@ -90,14 +121,12 @@ async def on_settings_update(settings: dict):
 
 | Setting | Value |
 |---------|-------|
-| **Model** | {provider_name} |
-| **API Key** | `{masked_key}` |
+| **AI Model** | {provider_name} |
+| **AI API Key** | `{masked_key}` |
 
 ---
 
-🎉 **You're all set!** Start chatting by typing a message below.
-
-Try: *"Hello, what can you help me with?"*
+🎉 **You're all set!**
 """,
         author="system",
     ).send()
@@ -111,7 +140,7 @@ async def on_message(message: cl.Message):
     
     if not configured or not config.get("api_key"):
         await cl.Message(
-            content="⚠️ **Please configure your API key first!**\n\nClick the ⚙️ **Settings** button in the chat bar above to enter your API key.",
+            content="⚠️ **Please configure your API key first!**\n\nClick the ⚙️ **Settings** button to enter your credentials.",
             author="system",
         ).send()
         return

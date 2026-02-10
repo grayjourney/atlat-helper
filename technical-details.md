@@ -424,11 +424,259 @@ Added 3 new tests in `tests/unit/test_chat_api.py`:
 
 ---
 
+## [2026-02-08] Phase 4.6: Jira Credentials + SQLite Checkpointer
+
+### Implementation Details
+
+**Pattern:** Platform-Specific Factory + Session-Based Auth
+
+**What:** 
+1. Added Jira configuration fields to Chainlit ChatSettings (URL, email, API token)
+2. Replaced `MemorySaver` with `SqliteSaver` for persistent chat history
+3. Used platform-specific app data directories for cross-platform support
+
+**Files Modified:**
+
+| File | Change |
+|------|--------|
+| `ui/app.py` | Added Jira config fields with token generation instructions |
+| `src/persistence/checkpointer.py` | SQLite checkpointer with platform paths |
+| `requirements.txt` | Added `langgraph-checkpoint-sqlite` |
+
+### Platform-Specific Paths
+
+| Platform | Data Directory |
+|----------|----------------|
+| **Windows** | `%APPDATA%/atlat-helper/chat_history.db` |
+| **macOS** | `~/Library/Application Support/atlat-helper/chat_history.db` |
+| **Linux** | `~/.local/share/atlat-helper/chat_history.db` |
+
+### Jira Auth Flow
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant UI as Chainlit UI
+    participant API as FastAPI
+    participant Jira as Jira Cloud
+
+    User->>UI: Enter Jira URL, Email, Token
+    UI->>UI: Store in session (jira_config)
+    User->>UI: "Show my tickets"
+    UI->>API: POST /agent/chat/stream + config
+    API->>Jira: GET /rest/api/3/search (Basic Auth)
+    Jira->>API: Tickets JSON
+    API->>UI: SSE stream response
+```
+
+### Trade-offs
+
+- (+) API Token is simpler than OAuth for MVP
+- (+) SQLite is cross-platform and serverless
+- (+) Session-only storage = more secure (no credential persistence)
+- (-) User must re-enter credentials on page refresh
+- (-) OAuth 2.0 would provide smoother UX (deferred to Phase 7)
+
+---
+
 ## Known Issues
 
 | Issue | Severity | Status |
 |-------|----------|--------|
-| Subgraphs are single nodes, not multi-step graphs | Design debt | Open |
-| No validation if `jira_config` fields are missing | Bug | Open |
-| LLM call to extract ticket ID is fragile (should use structured output) | Fragile | Open |
+| Subgraphs are single nodes, not multi-step graphs | Design debt | Open (Phase 7) |
+| ~~No validation if `jira_config` fields are missing~~ | ~~Bug~~ | ✅ Fixed |
+| ~~LLM call to extract ticket ID is fragile~~ | ~~Fragile~~ | ✅ Fixed (Pydantic structured output) |
+| ~~Jira API 410 error (deprecated endpoint)~~ | ~~Bug~~ | ✅ Fixed (migrated to /rest/api/3/search/jql) |
 
+
+## [2026-02-08] Module: JiraClient API Migration
+### Implementation Details
+- **Pattern:** Adapter
+- **What:** Migrated from deprecated `/rest/api/3/search` to new `/rest/api/3/search/jql` endpoint
+- **Why:** Atlassian deprecated the old endpoint (CHANGE-2046)
+- **Trade-offs:** Required adding explicit `fields` parameter to get ticket data
+
+### Key Logic
+- Added `fields` param: `summary,status,assignee,priority,labels,created,updated,description,reporter`
+- Added `_extract_text_from_adf()` to handle Atlassian Document Format (ADF) for description field
+- New endpoint requires bounded JQL queries (filter like `assignee=currentUser()` required)
+
+## [2026-02-09] Phase 3: Atlassian MCP Integration
+
+### Implementation Details
+- **Pattern:** Factory + LLM Tool Binding (Agentic)
+- **What:** Replaced custom API wrappers with the official Atlassian MCP connection and delegated tool execution to the LLM. 
+- **Files changes**: 
+  - `src/mcp/mcp_factory.py` (added): Implements `AtlassianMCPFactory` using `langchain-mcp-adapters` to create `MultiServerMCPClient`.
+  - `src/api/oauth_routes.py` (updated): Refactored to redirect to `mcp.atlassian.com` for OAuth flow instead of handling it locally.
+  - `src/agents/subgraphs/ticket.py` (updated): Replaced `JiraClient` usage with `AtlassianMCPFactory.get_tools()` and LLM tool binding.
+  - `src/agents/subgraphs/confluence.py` (added): New subgraph using MCP tools for Confluence search.
+  - `src/mcp/jira_client.py` (removed): Legacy custom client deprecated in favor of MCP.
+  - `src/mcp/atlassian_mcp.py` (removed): Intermediate implementation removed.
+  - `src/api/auth.py` (removed): Custom OAuth logic removed.
+- **Why:** 
+  - **Official Support:** Uses Atlassian's maintained MCP server.
+  - **Broader Scope:** Enables Confluence and Compass integration out-of-the-box.
+  - **Agentic Workflow:** LLM decides which tool to use (e.g., `read-issue` vs `search-issues`) instead of hardcoded logic.
+- **Trade-offs:** 
+  - (+) Access to all Atlassian tools without manual implementation.
+  - (-) Dependency on `mcp.atlassian.com` availability.
+  - (-) Requires OAuth 2.1 browser flow (no API tokens).
+
+### Key Logic
+- **OAuth Delegation:** Instead of handling token exchange, we redirect users to `https://mcp.atlassian.com/v1/authorize`. The MCP server handles the handshake.
+- **Tool Binding:** `tools = await AtlassianMCPFactory.get_tools(token)` retrieves the dynamic list of tools (Jira, Confluence) and binds them to the LLM via `llm.bind_tools(tools)`. Use a System Prompt to enforce output formatting (Markdown tables).
+
+## [2026-02-09] Phase 4: Testing & Automation Strategy
+
+### Implementation Details
+- **Pattern:** Fake Adapter (Mock Factory) + Automated E2E Script
+- **What:** Implemented a dual-layer testing strategy: Mocks for logic verification, Script for live connectivity.
+- **Files changes**: 
+  - `tests/mocks/mock_mcp_factory.py` (added): Fake tools for unit testing.
+  - `tests/mocks/mock_llm.py` (added): Deterministic LLM for testing tool binding.
+  - `tests/integration/test_agent_flow.py` (added): CI-ready integration tests.
+  - `scripts/verify_e2e.py` (added): Standalone script for verifying real Atlassian connection.
+  - `src/mcp/token_storage.py` (updated): Switched from in-memory to JSON file persistence to support automation.
+  - `src/mcp/mcp_factory.py` (updated): Added support for Basic Auth (Email + API Token) alongside Bearer Token.
+- **Why:** 
+  - **Reliability:** Mocks prevent flaky CI failures due to network/API limits.
+  - **Realism:** E2E script ensures the actual API contract is respected.
+  - **Automation:** Persistent tokens allow the E2E script to run daily without manual login.
+- **Trade-offs:** 
+  - (+) Fast feedback loop for developers.
+  - (-) E2E script requires secure management of `token_storage.json` or env vars in production.
+
+### Key Logic
+- **MockLLM:** Simulates the tool calling loop by inspecting input for keywords (e.g., "TEST-1") and returning structured `tool_calls`, then returning a final answer when it sees a `ToolMessage`.
+- **Dual Auth:** `AtlassianMCPFactory` now detects "Basic " prefix to support both OAuth (Bearer) and API Tokens (Basic) seamlessly.
+
+## [2026-02-09] Phase 5: Cleanup & Release
+
+### Implementation Details
+- **Cleanup:** Removed legacy `src/mcp/base_client.py` and `src/mcp/mock_server.py`.
+- **Infrastructure:** Removed `mock-jira` service from `docker-compose.yml`.
+- **Documentation:** Updated `task.md` and `changelog.md` to reflect final state.
+- **Why:** To reduce technical debt and confusion by removing unused code paths and containers.
+
+
+
+
+## [2026-02-09] Module: Auth & MCP Strategy Pivot
+### Implementation Details
+- **Pattern:** Local MCP Server Adapter (Stdio Transport)
+- **What:** Switched from Cloud MCP (OAuth) to Local Python MCP Server (Basic Auth).
+- **Files changes**:
+  - `src/mcp/server.py` (added): Custom FastMCP server using `atlassian-python-api`.
+  - `src/mcp/mcp_factory.py` (updated): Configured to run `python -m src.mcp.server` via stdio if Basic Auth creds are present.
+  - `ui/app.py` (updated): Restored Basic Auth input fields, removed broken OAuth flow.
+  - `requirements.txt` (updated): Added `atlassian-python-api`.
+- **Why:** `mcp.atlassian.com` requires OAuth Client ID which is not public. To support users immediately, we fell back to the robust Basic Auth (Email/Token) method using a local MCP adapter.
+- **Trade-offs:** 
+  - (+) Works with existing API Tokens.
+  - (+) Full control over tool implementation in Python.
+  - (-) Not using the "official" Atlassian Cloud MCP (yet), but compliant with MCP standard.
+
+### Key Logic
+- **Stdio Transport:** `AtlassianMCPFactory` spawns a subprocess running `src/mcp/server.py` and communicates via stdin/stdout using the Model Context Protocol. Environment variables are injected into the subprocess to configure the Atlassian client.
+
+## [2026-02-09] Configuration Fixes
+
+### Implementation Details
+- **Pattern:** Environment Variable Separation
+- **What:** Introduced `PUBLIC_API_URL` alongside `API_URL`.
+- **Files changes**: 
+  - `docker-compose.yml`: Added `PUBLIC_API_URL` (default `localhost:8000`) and `GEMINI_API_KEY` to UI service.
+  - `ui/app.py`: Updated redirect logic to use `PUBLIC_API_URL` and pre-fill API Key.
+  - `.env`: Added `GEMINI_API_KEY`.
+- **Why:** 
+  - `API_URL` (internal docker alias `http://api:8000`) is not resolvable by the user's browser during OAuth redirect.
+  - `GEMINI_API_KEY` was requested as a default convenience.
+- **Trade-offs:** 
+  - Requires valid `PUBLIC_API_URL` if deployed behind a domain/proxy (default works for localhost).
+
+## [2026-02-09] Auth Strategy Pivot: Basic Auth Fallback
+
+### Implementation Details
+- **Pattern:** Circuit Breaker / Fallback
+- **What:** Automatically use Basic Auth (Email + API Token) when OAuth is not configured or failing.
+- **Files changes**:
+  - `src/api/oauth_routes.py`: `/status` endpoint now checks for `ATLASSIAN_EMAIL` and `ATLASSIAN_API_TOKEN` in environment.
+  - `src/mcp/mcp_factory.py`: `create_client` now constructs Basic Auth headers from env vars if no OAuth token is provided.
+- **Why:** 
+  - User encountered "Internal Server Error" on Atlassian OAuth (likely due to missing Client ID/Secret in strict OAuth 2.1 flow).
+  - User already provided valid API Tokens in `.env`.
+  - Basic Auth is a robust fallback for server-side agents.
+- **Trade-offs:** 
+  - (+) Immediate stability.
+  - (-) Less secure than OAuth for multi-user (shared env vars), but acceptable for single-user local agent.
+
+## [2026-02-09] Auth Strategy: Full OAuth 2.0 (3LO)
+
+### Implementation Details
+- **Pattern:** Authorization Code Grant (3LO)
+- **What:** Implemented standard OAuth flow for Atlassian.
+- **Files changes**:
+  - `src/api/oauth_routes.py`: Implemented `/login` and `/callback` to handle authorization and token exchange.
+  - `src/mcp/mcp_factory.py`: Updated to utilize `TokenStorage` (OAuth) if available, falling back to Basic Auth.
+  - `src/mcp/token_storage.py`: Validated schema for Access/Refresh tokens.
+  - `docker-compose.yml`: Added `ATLASSIAN_CLIENT_ID`, `SECRET`, and `REDIRECT_URI` support.
+- **Why:** 
+  - User requirements shifted to strictly use OAuth.
+  - `mcp.atlassian.com` requires valid credentials (either 3LO token or internal auth).
+- **Trade-offs:** 
+  - (+) Secure, standard, user-consent driven.
+  - (-) Requires user to register an App in Atlassian Developer Console.
+
+## [2026-02-10] Auth Strategy: Multi-Tenant Proxy Service
+
+### Implementation Details
+- **Pattern:** Backend-Consenting-Client Proxy
+- **What:** A minimal FastAPI service (`auth-proxy/`) handles the OAuth 2.0 Authorization Code flow with `CLIENT_SECRET`.
+- **Files changes**:
+  - `auth-proxy/main.py`: Implemented `/login`, `/callback`, `/refresh`.
+  - `src/api/oauth_routes.py`: Updated client to redirect to Proxy URL instead of Atlassian directly.
+  - `docker-compose.yml`: Added `AUTH_PROXY_URL`, removed `CLIENT_SECRET`.
+- **Why:** 
+  - To support multi-tenancy and safe distribution, the Client App (Open Source / Distributed) cannot hold the Client Secret.
+  - Atlassian 3LO does not support PKCE yet.
+  - This architecture centralizes secret management and allows any user to connect their own Jira instance via our single App Registration.
+- **Trade-offs:** 
+  - (+) Secure distribution, cleaner UX (End User just clicks Connect).
+  - (-) Introduces a central dependency (Proxy Service must be hosted).
+
+## [2026-02-10] Decision: Pivot to Standard Jira REST API
+### Implementation Details
+- **Architecture Change:** Switched from `AtlassianMCPFactory` (langchain-mcp-adapters) to custom `JiraClient` (httpx).
+- **Reason:** The official Atlassian MCP server (`mcp.atlassian.com`) acts as a "Beta" service that restricts access to approved OAuth clients, causing `401 Unauthorized` errors for public 3LO tokens.
+- **Alternatives Evaluated:**
+    - `atlassian/atlassian-mcp-server`: Official hosted service. Restricted.
+    - `sooperset/mcp-atlassian`: Community Docker image. Requires manual API Token configuration (breaking the "One-Click" OAuth flow) and adds container overhead.
+- **Why REST API?**
+    - reusing the **valid** OAuth token we already retrieved.
+    - Zero infrastructure changes (runs in existing API container).
+    - Full control over tools (`list_tickets`, `create_ticket`).
+
+### Key Logic
+- The `JiraClient` will manually construct requests to `https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/...`.
+- `cloud_id` is dynamically fetched from `https://api.atlassian.com/oauth/token/accessible-resources`.
+
+## [2026-02-10] Module: JiraClient
+### Implementation Details
+- **Pattern:** Async HTTP Client with Proxy Rotation
+- **What:** Implemented `src/jira/client.py` using `httpx`.
+- **Files changes:** Created `src/jira/client.py`, Added `respx` to requirements.
+- **Why:** To replace restricted Atlassian MCP. 
+- **Trade-offs:** Custom client requires maintenance but allows full control over Auth flow (Proxy Refresh).
+
+### Key Logic
+- **Token Refresh:** `_refresh_access_token` calls `AUTH_PROXY_URL/refresh` on 401 error, preserving strict separation of concerns (Client Secret stays on Proxy).
+- **Multi-Site:** `get_accessible_resources` fetches available sites. `search_issues` enforces `cloud_id` presence.
+
+## [2026-02-10] Module: TicketAgent
+### Implementation Details
+- **Pattern:** State-based Multi-turn Selection
+- **What:** Refactored `ticket_node` to handle Cloud ID selection statefully.
+- **Files changes:** Updated `src/agents/subgraphs/ticket.py`, Added fields to `AgentState`, Updated `router.py`.
+- **Why:** To support users with multiple Jira sites without complex subgraph recursion.
+- **Trade-offs:** Adds `awaiting_input` logic to shared state, coupling Router slightly.
