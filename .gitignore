@@ -42,4 +42,8 @@ env/
 .mypy_cache/
 
 # Docker
+# Docker
 .docker/
+
+# Agent
+.agent/
